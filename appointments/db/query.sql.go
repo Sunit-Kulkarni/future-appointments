@@ -190,46 +190,6 @@ func (q *Queries) GetAvailabilityByTrainerAndWeekday(ctx context.Context, arg Ge
 	return items, nil
 }
 
-const getOverlappingAppointments = `-- name: GetOverlappingAppointments :many
-SELECT id, trainer_id, user_id, starts_at, ends_at, created_at FROM appointments
-WHERE trainer_id = $1
-  AND starts_at < $2
-  AND ends_at   > $3
-`
-
-type GetOverlappingAppointmentsParams struct {
-	TrainerID int32
-	StartsAt  pgtype.Timestamptz
-	EndsAt    pgtype.Timestamptz
-}
-
-func (q *Queries) GetOverlappingAppointments(ctx context.Context, arg GetOverlappingAppointmentsParams) ([]Appointment, error) {
-	rows, err := q.db.Query(ctx, getOverlappingAppointments, arg.TrainerID, arg.StartsAt, arg.EndsAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Appointment
-	for rows.Next() {
-		var i Appointment
-		if err := rows.Scan(
-			&i.ID,
-			&i.TrainerID,
-			&i.UserID,
-			&i.StartsAt,
-			&i.EndsAt,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getTrainerByID = `-- name: GetTrainerByID :one
 SELECT id, name, email, timezone FROM trainers WHERE id = $1
 `

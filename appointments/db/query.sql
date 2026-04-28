@@ -16,12 +16,6 @@ INSERT INTO appointments (trainer_id, user_id, starts_at, ends_at)
 VALUES ($1, $2, $3, $4)
 RETURNING *;
 
--- name: GetOverlappingAppointments :many
-SELECT * FROM appointments
-WHERE trainer_id = $1
-  AND starts_at < $2
-  AND ends_at   > $3;
-
 -- name: GetAppointmentsByTrainer :many
 SELECT
     a.id,

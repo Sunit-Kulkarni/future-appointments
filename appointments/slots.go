@@ -76,18 +76,21 @@ func GetSlots(ctx context.Context, trainerID int32, p *GetSlotsParams) (*GetSlot
 		byWeekday[time.Weekday(wd)] = blocksFromRows(rows)
 	}
 
-	booked, err := query.GetAppointmentsByTrainerBetween(ctx, db.GetAppointmentsByTrainerBetweenParams{
+	bookedRows, err := query.GetAppointmentsByTrainerBetween(ctx, db.GetAppointmentsByTrainerBetweenParams{
 		TrainerID: trainerID,
-		StartsAt: pgtype.Timestamptz{Time: p.StartsAt, Valid: true},
-		EndsAt:   pgtype.Timestamptz{Time: p.EndsAt, Valid: true},
+		StartsAt:  pgtype.Timestamptz{Time: p.StartsAt, Valid: true},
+		EndsAt:    pgtype.Timestamptz{Time: p.EndsAt, Valid: true},
 	})
 	if err != nil {
 		return nil, eb.Cause(err).Code(errs.Unavailable).Msg("failed to load appointments").Err()
 	}
 
-	slots := generateSlots(p.StartsAt, p.EndsAt, byWeekday, trainerLoc)
-	slots = filterBookedSlots(slots, booked)
-	slots = filterPast(slots, time.Now())
+	booked := make(map[int64]struct{}, len(bookedRows))
+	for _, b := range bookedRows {
+		booked[b.StartsAt.Time.Unix()] = struct{}{}
+	}
+
+	slots := generateSlots(p.StartsAt, p.EndsAt, byWeekday, trainerLoc, booked, time.Now())
 
 	out := make([]Slot, 0, len(slots))
 	for _, s := range slots {

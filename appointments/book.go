@@ -76,41 +76,23 @@ func Book(ctx context.Context, p *BookParams) (*Appointment, error) {
 		return nil, eb.Code(errs.InvalidArgument).Msg("requested time is outside trainer availability").Err()
 	}
 
-	tx, err := pgxdb.Begin(ctx)
-	if err != nil {
-		return nil, eb.Cause(err).Code(errs.Unavailable).Msg("failed to start transaction").Err()
-	}
-	defer tx.Rollback(context.Background())
-
-	q := query.WithTx(tx)
-
-	overlap, err := q.GetOverlappingAppointments(ctx, db.GetOverlappingAppointmentsParams{
-		TrainerID: p.TrainerID,
-		StartsAt: pgtype.Timestamptz{Time: p.EndsAt, Valid: true},
-		EndsAt:   pgtype.Timestamptz{Time: p.StartsAt, Valid: true},
-	})
-	if err != nil {
-		return nil, eb.Cause(err).Code(errs.Unavailable).Msg("overlap check failed").Err()
-	}
-	if len(overlap) > 0 {
-		return nil, eb.Code(errs.AlreadyExists).Msg("slot is already booked").Err()
-	}
-
-	created, err := q.InsertAppointment(ctx, db.InsertAppointmentParams{
+	// No application-level overlap check, no transaction. The unique index
+	// `(trainer_id, starts_at)` is the single source of truth: with the spec's
+	// alignment invariant (30-min appointments on :00/:30) the only conflict
+	// mode is identical starts_at, which the index rejects atomically. A
+	// SELECT-then-INSERT pair would only add a TOCTOU window. See README
+	// "Algorithm & concurrency".
+	created, err := query.InsertAppointment(ctx, db.InsertAppointmentParams{
 		TrainerID: p.TrainerID,
 		UserID:    p.UserID,
-		StartsAt: pgtype.Timestamptz{Time: p.StartsAt, Valid: true},
-		EndsAt:   pgtype.Timestamptz{Time: p.EndsAt, Valid: true},
+		StartsAt:  pgtype.Timestamptz{Time: p.StartsAt, Valid: true},
+		EndsAt:    pgtype.Timestamptz{Time: p.EndsAt, Valid: true},
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
 			return nil, eb.Code(errs.AlreadyExists).Msg("slot is already booked").Err()
 		}
 		return nil, eb.Cause(err).Code(errs.Unavailable).Msg("failed to insert appointment").Err()
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, eb.Cause(err).Code(errs.Unavailable).Msg("failed to commit transaction").Err()
 	}
 
 	return &Appointment{

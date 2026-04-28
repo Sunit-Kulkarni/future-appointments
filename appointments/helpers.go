@@ -36,14 +36,19 @@ func blocksFromRows(rows []db.Availability) []availabilityBlock {
 	return out
 }
 
-// generateSlots emits 30-minute slots between dayStart and dayEnd (inclusive
-// of dayStart-instant range) for each block on each weekday inside the range.
-// All slot times are constructed directly in loc via time.Date so DST
+// generateSlots emits 30-minute slots between rangeStart and rangeEnd for
+// each availability block on each weekday inside the range, skipping any
+// slot that starts before `now` or whose start instant is in the `booked`
+// set. Slot times are constructed directly in loc via time.Date so DST
 // transitions are handled correctly.
-func generateSlots(rangeStart, rangeEnd time.Time, byWeekday map[time.Weekday][]availabilityBlock, loc *time.Location) []bookableSlot {
+//
+// The booked set works because every appointment is exactly 30 minutes on
+// a :00/:30 boundary (enforced in book.go), so a slot conflicts with a
+// booking iff their start instants match — an O(1) hash lookup, not an
+// interval intersection. See README "Algorithm & concurrency".
+func generateSlots(rangeStart, rangeEnd time.Time, byWeekday map[time.Weekday][]availabilityBlock, loc *time.Location, booked map[int64]struct{}, now time.Time) []bookableSlot {
 	var slots []bookableSlot
 
-	// Iterate by calendar day in loc.
 	startLocal := rangeStart.In(loc)
 	endLocal := rangeEnd.In(loc)
 
@@ -51,8 +56,7 @@ func generateSlots(rangeStart, rangeEnd time.Time, byWeekday map[time.Weekday][]
 	last := time.Date(endLocal.Year(), endLocal.Month(), endLocal.Day(), 0, 0, 0, 0, loc)
 
 	for !day.After(last) {
-		blocks := byWeekday[day.Weekday()]
-		for _, b := range blocks {
+		for _, b := range byWeekday[day.Weekday()] {
 			slotStart := time.Date(day.Year(), day.Month(), day.Day(), b.startHour, b.startMin, 0, 0, loc)
 			blockEnd := time.Date(day.Year(), day.Month(), day.Day(), b.endHour, b.endMin, 0, 0, loc)
 			for {
@@ -60,8 +64,10 @@ func generateSlots(rangeStart, rangeEnd time.Time, byWeekday map[time.Weekday][]
 				if slotEnd.After(blockEnd) {
 					break
 				}
-				// Clip to the requested instant range.
-				if !slotStart.Before(rangeStart) && !slotEnd.After(rangeEnd) {
+				_, taken := booked[slotStart.Unix()]
+				inWindow := !slotStart.Before(rangeStart) && !slotEnd.After(rangeEnd)
+				future := !slotStart.Before(now)
+				if inWindow && future && !taken {
 					slots = append(slots, bookableSlot{Start: slotStart, End: slotEnd})
 				}
 				slotStart = slotEnd
@@ -70,39 +76,6 @@ func generateSlots(rangeStart, rangeEnd time.Time, byWeekday map[time.Weekday][]
 		day = day.AddDate(0, 0, 1)
 	}
 	return slots
-}
-
-// filterBookedSlots removes any slot whose [start,end) overlaps a booked
-// appointment using the standard overlap predicate.
-func filterBookedSlots(slots []bookableSlot, booked []db.Appointment) []bookableSlot {
-	if len(booked) == 0 {
-		return slots
-	}
-	out := slots[:0]
-	for _, s := range slots {
-		conflict := false
-		for _, b := range booked {
-			if b.StartsAt.Time.Before(s.End) && b.EndsAt.Time.After(s.Start) {
-				conflict = true
-				break
-			}
-		}
-		if !conflict {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-// filterPast removes slots that start before now.
-func filterPast(slots []bookableSlot, now time.Time) []bookableSlot {
-	out := slots[:0]
-	for _, s := range slots {
-		if !s.Start.Before(now) {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 // withinAvailability reports whether [localStart,localEnd] sits inside one

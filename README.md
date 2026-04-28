@@ -194,6 +194,89 @@ work without a schema change. NULL `start_time`/`end_time` means the
 trainer is unavailable that weekday. Default seed is M–F 08:00–17:00 to
 match the assignment.
 
+## Algorithm & concurrency
+
+The whole service leans on one product invariant from the spec:
+
+> *All appointments are 30 minutes long, and should be scheduled at :00, :30
+> minutes after the hour during business hours.*
+
+That single sentence collapses the geometry of the problem. **Two
+appointments for the same trainer can only conflict in one way: identical
+`starts_at`.** There is no off-grid case, no partial overlap, no
+half-hour-shifted collision. Once you see that, two pieces of "obvious"
+defensive code disappear:
+
+### Slot generation — hash-set lookup, single pass
+
+`generateSlots` ([appointments/helpers.go](appointments/helpers.go)) builds
+30-minute slots day-by-day in the trainer's local timezone, checking three
+conditions inline:
+
+1. The slot fits inside the requested `[starts_at, ends_at]` window.
+2. The slot starts in the future (`!slot.Before(time.Now())`).
+3. The slot's start instant isn't in the `booked` hash set.
+
+The booked set is built once from the `GetAppointmentsByTrainerBetween`
+result — `map[int64]struct{}` keyed on `b.StartsAt.Time.Unix()`. Membership
+is O(1). Total: **O(D·B·S + K)**, where D = days, B = blocks/day, S =
+slots/block, K = booked appointments — versus the naive O(D·B·S·K) that
+overlap-scans every slot against every booking. There's no separate
+`filterBookedSlots` or `filterPast` pass; both checks happen in the same
+loop that emits slots.
+
+### Booking — the unique index *is* the safety net
+
+`book.go` does no application-level overlap query and runs no transaction.
+A successful booking is a single statement:
+
+```go
+created, err := query.InsertAppointment(ctx, db.InsertAppointmentParams{...})
+if isUniqueViolation(err) {
+    return errs.AlreadyExists
+}
+```
+
+The migration declares
+`CREATE UNIQUE INDEX appointments_trainer_time_idx ON appointments
+(trainer_id, starts_at)` — Postgres rejects any conflict atomically with a
+`23505` unique violation. There is no SELECT-then-INSERT TOCTOU window
+because there is no SELECT. Concurrent identical bookings race against the
+index, exactly one wins, the rest map to `errs.AlreadyExists` with the same
+message a slow application-level check would have produced.
+
+### Upgrade path: variable-duration appointments
+
+The day product asks for, say, 60-minute sessions for senior trainers, the
+unique index is no longer sufficient — a 60-min booking at 9:00 conflicts
+with a 30-min booking at 9:30, but their `starts_at` differ. The fix is
+mechanical, not architectural:
+
+1. **Migration** — swap the unique index for a Postgres **EXCLUSION
+   constraint** that rejects any two range-overlapping appointments for the
+   same trainer:
+
+   ```sql
+   ALTER TABLE appointments
+     DROP CONSTRAINT appointments_trainer_time_idx,
+     ADD CONSTRAINT appointments_no_overlap
+       EXCLUDE USING gist (
+         trainer_id WITH =,
+         tstzrange(starts_at, ends_at, '[)') WITH &&
+       );
+   ```
+
+2. **`isUniqueViolation`** — add the `23P01` exclusion-violation code.
+3. **Slot generation** — the booked set becomes a *covered cells* set: for
+   each booking, mark every 30-min cell from `starts_at` to `ends_at`. A
+   60-min booking at 9:00 marks {9:00, 9:30}. Lookup stays O(1).
+4. **Validation** — replace `if d != SlotDuration` with an allowed-set
+   check.
+
+Total: ~10 LOC plus one migration. The application code stays thin because
+the safety net was always the database constraint, not application logic;
+only the constraint primitive changes (point uniqueness → range exclusion).
+
 ## What I'd add with more time
 
 - Pagination on `/trainers/:id/appointments`.

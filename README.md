@@ -107,13 +107,40 @@ curl -s "http://localhost:4000/trainers/1/slots?starts_at=2026-05-04T00:00:00-07
 | <http://localhost:4000> | API base |
 | <http://localhost:9400> | Encore dev dashboard — traces, request runner, DB browser, schema |
 
-### 5. Useful commands
+### 5. Tests
 
 ```bash
-encore run                      # start (auto-reloads on save)
-encore db shell appointments    # psql into the local DB
-encore db reset appointments    # drop + recreate; restart `encore run` to reseed
-encore check                    # static check (compile + lint)
+encore test ./...
+```
+
+Encore spins up an isolated test database (auto-migrated, separate from
+your dev DB), then runs the full Go test suite. ~17 tests / ~28 subtests
+covering:
+
+- **Pure-function unit tests** ([helpers_test.go](appointments/helpers_test.go))
+  for `generateSlots`, `withinAvailability`, `blocksFromRows`,
+  `isUniqueViolation` — table-driven, no DB.
+- **Handler tests** ([book_test.go](appointments/book_test.go),
+  [slots_test.go](appointments/slots_test.go),
+  [list_test.go](appointments/list_test.go)) calling `Book`, `GetSlots`,
+  and `ListAppointments` against the real handlers + test DB. Covers the
+  full validation matrix (weekend, before/after hours, wrong duration,
+  off-boundary, past, missing fields, unknown trainer, unknown timezone),
+  the booked-slot exclusion path, JOIN ordering, and timezone-override
+  formatting.
+
+Tests truncate the `appointments` table between cases (shared DB +
+truncation pattern) and use deterministic `futureWeekday` /
+`futureWeekend` helpers so they don't depend on the wall clock.
+
+### 6. Useful commands
+
+```bash
+encore run                        # start (auto-reloads on save)
+encore test ./...                 # run the test suite
+encore db shell appointments      # psql into the local DB
+encore db reset appointments      # drop + recreate; restart `encore run` to reseed
+encore check                      # static check (compile + lint)
 cd appointments && sqlc generate  # regenerate db/*.go after editing query.sql or migrations
 ```
 
@@ -291,6 +318,9 @@ only the constraint primitive changes (point uniqueness → range exclusion).
 - Temporal-driven workflow for multi-step booking flows (hold slot →
   collect payment → confirm), with the booking endpoint enqueueing
   rather than writing directly.
-- A seed-data-aware test harness running against an ephemeral Encore
-  test DB; right now correctness is verified manually via the dev
-  dashboard.
+- Concurrency stress tests on `Book` (fire N parallel identical POSTs,
+  assert exactly one wins) — the unique index already provides this
+  guarantee, but a load test would prove it under real contention.
+- Property-based / fuzz tests on `generateSlots` (random availability
+  shapes + random booked sets, invariant: no returned slot is past, in
+  the booked set, or outside the window).

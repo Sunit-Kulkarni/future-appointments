@@ -53,6 +53,12 @@ func init() {
 	if encore.Meta().Environment.Cloud != encore.CloudLocal {
 		return
 	}
+	// Tests run in a separate test database and load fixtures synchronously
+	// from TestMain — skip the background seed to avoid racing with table
+	// truncation between tests.
+	if encore.Meta().Environment.Type == encore.EnvTest {
+		return
+	}
 	go seed()
 }
 

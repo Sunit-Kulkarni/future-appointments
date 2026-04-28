@@ -13,8 +13,8 @@ type AppointmentDetail struct {
 	TrainerName string `json:"trainer_name"`
 	UserID      int32  `json:"user_id"`
 	UserName    string `json:"user_name"`
-	StartedAt   string `json:"started_at"`
-	EndedAt     string `json:"ended_at"`
+	StartsAt   string `json:"starts_at"`
+	EndsAt     string `json:"ends_at"`
 	Timezone    string `json:"timezone"`
 }
 
@@ -48,8 +48,8 @@ func ListAppointments(ctx context.Context, trainerID int32) (*ListAppointmentsRe
 			TrainerName: r.TrainerName,
 			UserID:      r.UserID,
 			UserName:    r.UserName,
-			StartedAt:   r.StartedAt.Time.In(loc).Format(time.RFC3339),
-			EndedAt:     r.EndedAt.Time.In(loc).Format(time.RFC3339),
+			StartsAt:   r.StartsAt.Time.In(loc).Format(time.RFC3339),
+			EndsAt:     r.EndsAt.Time.In(loc).Format(time.RFC3339),
 			Timezone:    r.TrainerTimezone,
 		})
 	}

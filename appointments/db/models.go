@@ -12,8 +12,8 @@ type Appointment struct {
 	ID        int64
 	TrainerID int32
 	UserID    int32
-	StartedAt pgtype.Timestamptz
-	EndedAt   pgtype.Timestamptz
+	StartsAt  pgtype.Timestamptz
+	EndsAt    pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
 }
 

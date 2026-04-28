@@ -33,8 +33,8 @@ Body:
 {
   "trainer_id": 1,
   "user_id": 2,
-  "started_at": "2026-05-04T09:00:00-07:00",
-  "ended_at":   "2026-05-04T09:30:00-07:00"
+  "starts_at": "2026-05-04T09:00:00-07:00",
+  "ends_at":   "2026-05-04T09:30:00-07:00"
 }
 ```
 
@@ -50,7 +50,8 @@ local timezone.
 
 ## Running locally
 
-Prerequisites: [Encore CLI](https://encore.dev/docs/install) and Docker.
+Prerequisites: [Encore CLI](https://encore.dev/docs/install) (`brew install
+encoredev/tap/encore`) and Docker Desktop.
 
 ```bash
 encore run
@@ -58,6 +59,12 @@ encore run
 
 - API: <http://localhost:4000>
 - Dev dashboard (traces, schemas, request runner): <http://localhost:9400>
+
+> **No Dockerfile needed.** The take-home doc mentions a Dockerfile would
+> be appreciated; Encore is the "or equivalent" — `encore run` provisions
+> Postgres in Docker for you, applies migrations, runs the seed init,
+> and exposes the dev dashboard. No `docker compose` or hand-written
+> Dockerfile to maintain.
 
 On first boot Encore provisions Postgres in Docker, applies migrations,
 and the service's `init()` seeds `fixtures.sql` (3 trainers, 10 users,

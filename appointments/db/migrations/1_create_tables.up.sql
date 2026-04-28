@@ -26,13 +26,13 @@ CREATE TABLE appointments (
     id         BIGSERIAL PRIMARY KEY,
     trainer_id INTEGER NOT NULL REFERENCES trainers(id),
     user_id    INTEGER NOT NULL REFERENCES users(id),
-    started_at TIMESTAMPTZ NOT NULL,
-    ended_at   TIMESTAMPTZ NOT NULL,
+    starts_at  TIMESTAMPTZ NOT NULL,
+    ends_at    TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX appointments_trainer_time_idx
-    ON appointments (trainer_id, started_at);
+    ON appointments (trainer_id, starts_at);
 
 CREATE INDEX appointments_trainer_range_idx
-    ON appointments (trainer_id, started_at, ended_at);
+    ON appointments (trainer_id, starts_at, ends_at);

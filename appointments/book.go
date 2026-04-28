@@ -14,16 +14,16 @@ import (
 type BookParams struct {
 	TrainerID int32     `json:"trainer_id"`
 	UserID    int32     `json:"user_id"`
-	StartedAt time.Time `json:"started_at"`
-	EndedAt   time.Time `json:"ended_at"`
+	StartsAt time.Time `json:"starts_at"`
+	EndsAt   time.Time `json:"ends_at"`
 }
 
 type Appointment struct {
 	ID        int64  `json:"id"`
 	TrainerID int32  `json:"trainer_id"`
 	UserID    int32  `json:"user_id"`
-	StartedAt string `json:"started_at"`
-	EndedAt   string `json:"ended_at"`
+	StartsAt string `json:"starts_at"`
+	EndsAt   string `json:"ends_at"`
 	Timezone  string `json:"timezone"`
 }
 
@@ -34,8 +34,8 @@ func Book(ctx context.Context, p *BookParams) (*Appointment, error) {
 	if p.TrainerID == 0 || p.UserID == 0 {
 		return nil, eb.Code(errs.InvalidArgument).Msg("trainer_id and user_id are required").Err()
 	}
-	if p.StartedAt.IsZero() || p.EndedAt.IsZero() {
-		return nil, eb.Code(errs.InvalidArgument).Msg("started_at and ended_at are required").Err()
+	if p.StartsAt.IsZero() || p.EndsAt.IsZero() {
+		return nil, eb.Code(errs.InvalidArgument).Msg("starts_at and ends_at are required").Err()
 	}
 
 	trainer, err := query.GetTrainerByID(ctx, p.TrainerID)
@@ -48,17 +48,17 @@ func Book(ctx context.Context, p *BookParams) (*Appointment, error) {
 		return nil, eb.Cause(err).Code(errs.Internal).Msg("invalid trainer timezone").Err()
 	}
 
-	localStart := p.StartedAt.In(loc)
-	localEnd := p.EndedAt.In(loc)
+	localStart := p.StartsAt.In(loc)
+	localEnd := p.EndsAt.In(loc)
 
-	if !p.StartedAt.After(time.Now()) {
-		return nil, eb.Code(errs.InvalidArgument).Msg("started_at must be in the future").Err()
+	if !p.StartsAt.After(time.Now()) {
+		return nil, eb.Code(errs.InvalidArgument).Msg("starts_at must be in the future").Err()
 	}
 	if d := localEnd.Sub(localStart); d != SlotDuration {
 		return nil, eb.Code(errs.InvalidArgument).Msgf("appointment duration must be %s, got %s", SlotDuration, d).Err()
 	}
 	if localStart.Second() != 0 || localStart.Nanosecond() != 0 || (localStart.Minute() != 0 && localStart.Minute() != 30) {
-		return nil, eb.Code(errs.InvalidArgument).Msg("started_at must align to a :00 or :30 boundary").Err()
+		return nil, eb.Code(errs.InvalidArgument).Msg("starts_at must align to a :00 or :30 boundary").Err()
 	}
 
 	availRows, err := query.GetAvailabilityByTrainerAndWeekday(ctx, db.GetAvailabilityByTrainerAndWeekdayParams{
@@ -86,8 +86,8 @@ func Book(ctx context.Context, p *BookParams) (*Appointment, error) {
 
 	overlap, err := q.GetOverlappingAppointments(ctx, db.GetOverlappingAppointmentsParams{
 		TrainerID: p.TrainerID,
-		StartedAt: pgtype.Timestamptz{Time: p.EndedAt, Valid: true},
-		EndedAt:   pgtype.Timestamptz{Time: p.StartedAt, Valid: true},
+		StartsAt: pgtype.Timestamptz{Time: p.EndsAt, Valid: true},
+		EndsAt:   pgtype.Timestamptz{Time: p.StartsAt, Valid: true},
 	})
 	if err != nil {
 		return nil, eb.Cause(err).Code(errs.Unavailable).Msg("overlap check failed").Err()
@@ -99,8 +99,8 @@ func Book(ctx context.Context, p *BookParams) (*Appointment, error) {
 	created, err := q.InsertAppointment(ctx, db.InsertAppointmentParams{
 		TrainerID: p.TrainerID,
 		UserID:    p.UserID,
-		StartedAt: pgtype.Timestamptz{Time: p.StartedAt, Valid: true},
-		EndedAt:   pgtype.Timestamptz{Time: p.EndedAt, Valid: true},
+		StartsAt: pgtype.Timestamptz{Time: p.StartsAt, Valid: true},
+		EndsAt:   pgtype.Timestamptz{Time: p.EndsAt, Valid: true},
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -117,8 +117,8 @@ func Book(ctx context.Context, p *BookParams) (*Appointment, error) {
 		ID:        created.ID,
 		TrainerID: created.TrainerID,
 		UserID:    created.UserID,
-		StartedAt: created.StartedAt.Time.In(loc).Format(time.RFC3339),
-		EndedAt:   created.EndedAt.Time.In(loc).Format(time.RFC3339),
+		StartsAt: created.StartsAt.Time.In(loc).Format(time.RFC3339),
+		EndsAt:   created.EndsAt.Time.In(loc).Format(time.RFC3339),
 		Timezone:  trainer.Timezone,
 	}, nil
 }

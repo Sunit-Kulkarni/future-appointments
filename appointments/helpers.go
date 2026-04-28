@@ -82,7 +82,7 @@ func filterBookedSlots(slots []bookableSlot, booked []db.Appointment) []bookable
 	for _, s := range slots {
 		conflict := false
 		for _, b := range booked {
-			if b.StartedAt.Time.Before(s.End) && b.EndedAt.Time.After(s.Start) {
+			if b.StartsAt.Time.Before(s.End) && b.EndsAt.Time.After(s.Start) {
 				conflict = true
 				break
 			}

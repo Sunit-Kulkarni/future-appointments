@@ -17,8 +17,8 @@ type bookableSlot struct {
 }
 
 type Slot struct {
-	StartedAt string `json:"started_at"`
-	EndedAt   string `json:"ended_at"`
+	StartsAt string `json:"starts_at"`
+	EndsAt   string `json:"ends_at"`
 }
 
 type GetSlotsParams struct {
@@ -78,8 +78,8 @@ func GetSlots(ctx context.Context, trainerID int32, p *GetSlotsParams) (*GetSlot
 
 	booked, err := query.GetAppointmentsByTrainerBetween(ctx, db.GetAppointmentsByTrainerBetweenParams{
 		TrainerID: trainerID,
-		StartedAt: pgtype.Timestamptz{Time: p.StartsAt, Valid: true},
-		EndedAt:   pgtype.Timestamptz{Time: p.EndsAt, Valid: true},
+		StartsAt: pgtype.Timestamptz{Time: p.StartsAt, Valid: true},
+		EndsAt:   pgtype.Timestamptz{Time: p.EndsAt, Valid: true},
 	})
 	if err != nil {
 		return nil, eb.Cause(err).Code(errs.Unavailable).Msg("failed to load appointments").Err()
@@ -92,8 +92,8 @@ func GetSlots(ctx context.Context, trainerID int32, p *GetSlotsParams) (*GetSlot
 	out := make([]Slot, 0, len(slots))
 	for _, s := range slots {
 		out = append(out, Slot{
-			StartedAt: s.Start.In(respLoc).Format(time.RFC3339),
-			EndedAt:   s.End.In(respLoc).Format(time.RFC3339),
+			StartsAt: s.Start.In(respLoc).Format(time.RFC3339),
+			EndsAt:   s.End.In(respLoc).Format(time.RFC3339),
 		})
 	}
 

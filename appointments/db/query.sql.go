@@ -23,8 +23,8 @@ func (q *Queries) DeleteAppointment(ctx context.Context, id int64) error {
 const getAppointmentsByTrainer = `-- name: GetAppointmentsByTrainer :many
 SELECT
     a.id,
-    a.started_at,
-    a.ended_at,
+    a.starts_at,
+    a.ends_at,
     a.created_at,
     t.id       AS trainer_id,
     t.name     AS trainer_name,
@@ -35,13 +35,13 @@ FROM appointments a
 JOIN trainers t ON t.id = a.trainer_id
 JOIN users    u ON u.id = a.user_id
 WHERE a.trainer_id = $1
-ORDER BY a.started_at
+ORDER BY a.starts_at
 `
 
 type GetAppointmentsByTrainerRow struct {
 	ID              int64
-	StartedAt       pgtype.Timestamptz
-	EndedAt         pgtype.Timestamptz
+	StartsAt        pgtype.Timestamptz
+	EndsAt          pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
 	TrainerID       int32
 	TrainerName     string
@@ -61,8 +61,8 @@ func (q *Queries) GetAppointmentsByTrainer(ctx context.Context, trainerID int32)
 		var i GetAppointmentsByTrainerRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.StartedAt,
-			&i.EndedAt,
+			&i.StartsAt,
+			&i.EndsAt,
 			&i.CreatedAt,
 			&i.TrainerID,
 			&i.TrainerName,
@@ -81,21 +81,21 @@ func (q *Queries) GetAppointmentsByTrainer(ctx context.Context, trainerID int32)
 }
 
 const getAppointmentsByTrainerBetween = `-- name: GetAppointmentsByTrainerBetween :many
-SELECT id, trainer_id, user_id, started_at, ended_at, created_at FROM appointments
+SELECT id, trainer_id, user_id, starts_at, ends_at, created_at FROM appointments
 WHERE trainer_id = $1
-  AND started_at >= $2
-  AND ended_at   <= $3
-ORDER BY started_at
+  AND starts_at >= $2
+  AND ends_at   <= $3
+ORDER BY starts_at
 `
 
 type GetAppointmentsByTrainerBetweenParams struct {
 	TrainerID int32
-	StartedAt pgtype.Timestamptz
-	EndedAt   pgtype.Timestamptz
+	StartsAt  pgtype.Timestamptz
+	EndsAt    pgtype.Timestamptz
 }
 
 func (q *Queries) GetAppointmentsByTrainerBetween(ctx context.Context, arg GetAppointmentsByTrainerBetweenParams) ([]Appointment, error) {
-	rows, err := q.db.Query(ctx, getAppointmentsByTrainerBetween, arg.TrainerID, arg.StartedAt, arg.EndedAt)
+	rows, err := q.db.Query(ctx, getAppointmentsByTrainerBetween, arg.TrainerID, arg.StartsAt, arg.EndsAt)
 	if err != nil {
 		return nil, err
 	}
@@ -107,8 +107,8 @@ func (q *Queries) GetAppointmentsByTrainerBetween(ctx context.Context, arg GetAp
 			&i.ID,
 			&i.TrainerID,
 			&i.UserID,
-			&i.StartedAt,
-			&i.EndedAt,
+			&i.StartsAt,
+			&i.EndsAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -191,20 +191,20 @@ func (q *Queries) GetAvailabilityByTrainerAndWeekday(ctx context.Context, arg Ge
 }
 
 const getOverlappingAppointments = `-- name: GetOverlappingAppointments :many
-SELECT id, trainer_id, user_id, started_at, ended_at, created_at FROM appointments
+SELECT id, trainer_id, user_id, starts_at, ends_at, created_at FROM appointments
 WHERE trainer_id = $1
-  AND started_at < $2
-  AND ended_at   > $3
+  AND starts_at < $2
+  AND ends_at   > $3
 `
 
 type GetOverlappingAppointmentsParams struct {
 	TrainerID int32
-	StartedAt pgtype.Timestamptz
-	EndedAt   pgtype.Timestamptz
+	StartsAt  pgtype.Timestamptz
+	EndsAt    pgtype.Timestamptz
 }
 
 func (q *Queries) GetOverlappingAppointments(ctx context.Context, arg GetOverlappingAppointmentsParams) ([]Appointment, error) {
-	rows, err := q.db.Query(ctx, getOverlappingAppointments, arg.TrainerID, arg.StartedAt, arg.EndedAt)
+	rows, err := q.db.Query(ctx, getOverlappingAppointments, arg.TrainerID, arg.StartsAt, arg.EndsAt)
 	if err != nil {
 		return nil, err
 	}
@@ -216,8 +216,8 @@ func (q *Queries) GetOverlappingAppointments(ctx context.Context, arg GetOverlap
 			&i.ID,
 			&i.TrainerID,
 			&i.UserID,
-			&i.StartedAt,
-			&i.EndedAt,
+			&i.StartsAt,
+			&i.EndsAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -247,32 +247,32 @@ func (q *Queries) GetTrainerByID(ctx context.Context, id int32) (Trainer, error)
 }
 
 const insertAppointment = `-- name: InsertAppointment :one
-INSERT INTO appointments (trainer_id, user_id, started_at, ended_at)
+INSERT INTO appointments (trainer_id, user_id, starts_at, ends_at)
 VALUES ($1, $2, $3, $4)
-RETURNING id, trainer_id, user_id, started_at, ended_at, created_at
+RETURNING id, trainer_id, user_id, starts_at, ends_at, created_at
 `
 
 type InsertAppointmentParams struct {
 	TrainerID int32
 	UserID    int32
-	StartedAt pgtype.Timestamptz
-	EndedAt   pgtype.Timestamptz
+	StartsAt  pgtype.Timestamptz
+	EndsAt    pgtype.Timestamptz
 }
 
 func (q *Queries) InsertAppointment(ctx context.Context, arg InsertAppointmentParams) (Appointment, error) {
 	row := q.db.QueryRow(ctx, insertAppointment,
 		arg.TrainerID,
 		arg.UserID,
-		arg.StartedAt,
-		arg.EndedAt,
+		arg.StartsAt,
+		arg.EndsAt,
 	)
 	var i Appointment
 	err := row.Scan(
 		&i.ID,
 		&i.TrainerID,
 		&i.UserID,
-		&i.StartedAt,
-		&i.EndedAt,
+		&i.StartsAt,
+		&i.EndsAt,
 		&i.CreatedAt,
 	)
 	return i, err

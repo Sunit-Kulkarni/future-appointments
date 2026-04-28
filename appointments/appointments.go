@@ -39,12 +39,14 @@ var fixturesSQL string
 //go:embed appointments.json
 var appointmentsJSON []byte
 
+// seedAppointment matches the on-disk shape of appointments.json (which uses
+// started_at/ended_at), independent of the API field names (starts_at/ends_at).
 type seedAppointment struct {
 	ID        int64  `json:"id"`
 	TrainerID int32  `json:"trainer_id"`
 	UserID    int32  `json:"user_id"`
-	StartedAt string `json:"started_at"`
-	EndedAt   string `json:"ended_at"`
+	StartsAt  string `json:"started_at"`
+	EndsAt    string `json:"ended_at"`
 }
 
 func init() {
@@ -70,20 +72,20 @@ func seed() {
 	}
 
 	for _, r := range records {
-		started, err := time.Parse(time.RFC3339, r.StartedAt)
+		started, err := time.Parse(time.RFC3339, r.StartsAt)
 		if err != nil {
-			rlog.Error("seed: bad started_at", "id", r.ID, "err", err)
+			rlog.Error("seed: bad starts_at", "id", r.ID, "err", err)
 			continue
 		}
-		ended, err := time.Parse(time.RFC3339, r.EndedAt)
+		ended, err := time.Parse(time.RFC3339, r.EndsAt)
 		if err != nil {
-			rlog.Error("seed: bad ended_at", "id", r.ID, "err", err)
+			rlog.Error("seed: bad ends_at", "id", r.ID, "err", err)
 			continue
 		}
 		_, err = appointmentsDB.Exec(ctx, `
-			INSERT INTO appointments (trainer_id, user_id, started_at, ended_at)
+			INSERT INTO appointments (trainer_id, user_id, starts_at, ends_at)
 			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (trainer_id, started_at) DO NOTHING
+			ON CONFLICT (trainer_id, starts_at) DO NOTHING
 		`,
 			r.TrainerID, r.UserID,
 			pgtype.Timestamptz{Time: started, Valid: true},

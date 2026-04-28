@@ -39,9 +39,11 @@ Body:
 ```
 
 Validates against the trainer's local-time availability for that weekday,
-exact 30-minute duration, `:00` / `:30` boundary, and not-in-past. Wraps
-overlap-check + insert in a transaction; returns `AlreadyExists` on
-conflict (overlap or unique violation `23505`).
+exact 30-minute duration, `:00` / `:30` boundary, and not-in-past. Conflict
+detection is delegated to the unique index on `(trainer_id, starts_at)`;
+on a duplicate, Postgres' `23505` is mapped to `errs.AlreadyExists`. No
+application-level overlap query, no transaction — see "Algorithm &
+concurrency" below for why that's safe.
 
 ### `GET /trainers/:trainer_id/appointments`
 
@@ -200,12 +202,15 @@ Two mechanisms, each suited to its data:
   Embedded via `go:embed`, parsed in Go because the records arrive as
   RFC3339 strings that need `time.Parse` → `pgtype.Timestamptz`
   conversion before insert. Inserts use `ON CONFLICT (trainer_id,
-  started_at) DO NOTHING` to stay idempotent. Bypasses business-hour
+  starts_at) DO NOTHING` to stay idempotent. Bypasses business-hour
   validation — some seed records fall on weekends (Jan 26 2019 is a
   Saturday), which is intentional historical data.
 
 Both are gated behind `encore.Meta().Environment.Cloud == encore.CloudLocal`
-so seed code is a no-op in any deployed environment.
+*and* skipped when `Environment.Type == encore.EnvTest`. The first gate
+keeps seed code from running in any deployed environment; the second
+keeps the background goroutine from racing against the test suite's
+table-truncation pattern (see "Tests" above).
 
 ## Availability model
 
@@ -277,11 +282,15 @@ message a slow application-level check would have produced.
 The day product asks for, say, 60-minute sessions for senior trainers, the
 unique index is no longer sufficient — a 60-min booking at 9:00 conflicts
 with a 30-min booking at 9:30, but their `starts_at` differ. The fix is
-mechanical, not architectural:
+mechanical, not architectural, but it splits cleanly into two halves: the
+**database** side, where conflict detection is essentially free, and the
+**application** side, where any change in *policy* (which durations are
+allowed, who can book what) must still live in code.
 
-1. **Migration** — swap the unique index for a Postgres **EXCLUSION
-   constraint** that rejects any two range-overlapping appointments for the
-   same trainer:
+**Database side — conflict detection moves into the constraint:**
+
+1. Swap the unique index for a Postgres **EXCLUSION constraint** that
+   rejects any two range-overlapping appointments for the same trainer:
 
    ```sql
    ALTER TABLE appointments
@@ -293,22 +302,60 @@ mechanical, not architectural:
        );
    ```
 
-2. **`isUniqueViolation`** — add the `23P01` exclusion-violation code.
-3. **Slot generation** — the booked set becomes a *covered cells* set: for
-   each booking, mark every 30-min cell from `starts_at` to `ends_at`. A
-   60-min booking at 9:00 marks {9:00, 9:30}. Lookup stays O(1).
-4. **Validation** — replace `if d != SlotDuration` with an allowed-set
-   check.
+2. Update the error helper: `isUniqueViolation` becomes
+   `isOverlapViolation`, accepting `23505` (point uniqueness) **and**
+   `23P01` (exclusion violation) so the booking handler still maps either
+   to `errs.AlreadyExists` without changing.
 
-Total: ~10 LOC plus one migration. The application code stays thin because
-the safety net was always the database constraint, not application logic;
-only the constraint primitive changes (point uniqueness → range exclusion).
+That's the architectural win. Conflict prevention is atomic in Postgres,
+no application overlap query reappears, the booking handler's structure is
+untouched.
+
+**Application side — duration is policy, and policy is code:**
+
+3. **Validation in [book.go](appointments/book.go).** Today it has
+   `if d != SlotDuration` — that's a hard 30-minute gate. Variable
+   durations need an allowed-set check, and the *shape* of that check
+   depends on product:
+
+   ```go
+   // simple: any duration in a global allowlist
+   if !slices.Contains([]time.Duration{30*time.Minute, 60*time.Minute}, d) { ... }
+
+   // realistic: per-trainer policy, fetched alongside the trainer row
+   if !slices.Contains(trainer.AllowedDurations, d) { ... }
+   ```
+
+   This is genuinely application logic, not infrastructure: it encodes
+   "senior trainers may offer 60-min sessions" or "premium-tier trainers
+   may offer 90-min sessions" — business rules the database has no
+   opinion on.
+
+4. **Slot generation in [helpers.go](appointments/helpers.go).** The
+   booked set becomes a *covered cells* set: for each booking, mark every
+   30-min cell it occupies. A 60-min booking at 9:00 marks {9:00, 9:30}.
+   Lookup stays O(1):
+
+   ```go
+   for _, b := range bookedRows {
+       for t := b.StartsAt.Time; t.Before(b.EndsAt.Time); t = t.Add(30*time.Minute) {
+           booked[t.Unix()] = struct{}{}
+       }
+   }
+   ```
+
+**Total cost:** ~10 lines of Go plus one migration. The split matters
+for an interview answer: claim the EXCLUDE constraint as the architectural
+win (it's why this stays a 10-line change instead of a rewrite), but be
+honest that duration-policy and covered-cells are still application code
+that has to be written and tested — they don't fall out of the database
+for free.
 
 ## What I'd add with more time
 
 - Pagination on `/trainers/:id/appointments`.
 - Cancellation: soft-delete column on `appointments` plus a DELETE
-  endpoint, so the unique `(trainer_id, started_at)` index becomes a
+  endpoint, so the unique `(trainer_id, starts_at)` index becomes a
   partial index over live rows.
 - Date-specific availability overrides table (vacations, one-off blocks).
 - Idempotency keys on `POST /appointments` so retries from flaky clients

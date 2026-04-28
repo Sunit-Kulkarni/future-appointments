@@ -9,5 +9,3 @@ encore.gen.cue
 .claude/todos/
 .claude/.last_run_id
 .claude/settings.local.json
-# .mcp.json is project MCP config — commit it if it's safe to share, ignore if it has local-only servers
-.mcp.json

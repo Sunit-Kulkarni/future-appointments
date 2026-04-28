@@ -1,0 +1,12 @@
+{
+    "mcpServers": {
+        "encore-mcp": {
+            "args": [
+                "mcp",
+                "run",
+                "--app=future-appointments-p74i"
+            ],
+            "command": "encore"
+        }
+    }
+}

@@ -1,76 +1,157 @@
-# Booking System Example
+# Future Appointments
 
-The example in this starter is an Appointment Booking System with both a user facing part (finding and booking appointments) and a admin part (setting availability and managing scheduled appointments). 
+A small Encore.go service for booking 30-minute training sessions with
+trainers. Three endpoints, real per-trainer availability, real IANA
+timezone handling.
 
-When a new appointment is booked, the backend sends a confirmation email to the user (utilizing the [Sendgrid Encore Bit integration](https://github.com/encoredev/examples/tree/main/bits/sendgrid)).
+Built as a Staff Backend take-home for [Future](https://future.co/).
 
-It has a React frontend with both a user facing part and an admin dashboard. Authentication is required for accessing admin dashboard.
+## Endpoints
 
-## Prerequisites 
+| Method | Path                                          | Purpose                                           |
+| ------ | --------------------------------------------- | ------------------------------------------------- |
+| GET    | `/trainers/:trainer_id/slots`                 | List available 30-min slots in a window           |
+| POST   | `/appointments`                               | Book a 30-min appointment                         |
+| GET    | `/trainers/:trainer_id/appointments`          | List a trainer's appointments (with user info)    |
 
-**Install Encore:**
-- **macOS:** `brew install encoredev/tap/encore`
-- **Linux:** `curl -L https://encore.dev/install.sh | bash`
-- **Windows:** `iwr https://encore.dev/install.ps1 | iex`
-  
-**Docker:**
-1. [Install Docker](https://docker.com)
-2. Start Docker
+### `GET /trainers/:trainer_id/slots`
 
-## Create app
+Query params:
+- `starts_at` (RFC3339, required) — window start.
+- `ends_at` (RFC3339, required) — window end.
+- `timezone` (IANA name, optional) — format response times in this zone;
+  defaults to the trainer's stored timezone.
 
-Create a local app from this template:
+Returns 30-min slots aligned to `:00` / `:30`, falling inside the trainer's
+weekday availability blocks, excluding any already-booked time, and
+filtering out anything in the past.
 
-```bash
-encore app create my-app-name --example=booking-system
+### `POST /appointments`
+
+Body:
+```json
+{
+  "trainer_id": 1,
+  "user_id": 2,
+  "started_at": "2026-05-04T09:00:00-07:00",
+  "ended_at":   "2026-05-04T09:30:00-07:00"
+}
 ```
 
-## Run app locally
+Validates against the trainer's local-time availability for that weekday,
+exact 30-minute duration, `:00` / `:30` boundary, and not-in-past. Wraps
+overlap-check + insert in a transaction; returns `AlreadyExists` on
+conflict (overlap or unique violation `23505`).
 
-Before running your application, make sure you have Docker installed and running. Then run this command from your application's root folder:
+### `GET /trainers/:trainer_id/appointments`
+
+JOINs in trainer name + user name, returns times formatted in the trainer's
+local timezone.
+
+## Running locally
+
+Prerequisites: [Encore CLI](https://encore.dev/docs/install) and Docker.
 
 ```bash
 encore run
 ```
 
-## View the frontend
+- API: <http://localhost:4000>
+- Dev dashboard (traces, schemas, request runner): <http://localhost:9400>
 
-While `encore run` is running, head over to [http://localhost:4000/frontend/](http://localhost:4000/frontend/) to view the frontend for your booking system monitor.
+On first boot Encore provisions Postgres in Docker, applies migrations,
+and the service's `init()` seeds `fixtures.sql` (3 trainers, 10 users,
+M–F 08:00–17:00 availability) plus the appointments from
+`appointments/appointments.json`. Seeding is gated to
+`encore.CloudLocal`, so it never runs in staging or production.
 
+## Why Encore
 
-## Local Development Dashboard
+- Auto-provisioned Postgres in dev — no `docker compose` to babysit.
+- Built-in tracing + dev dashboard make endpoint debugging trivial.
+- Declarative infra (`sqldb.NewDatabase`) keeps the service definition
+  in one place; the same code runs against managed Postgres in any cloud.
+- Pub/Sub and Temporal integrations are first-class — easy upgrade path
+  if this service grows notification or multi-step workflow needs.
 
-While `encore run` is running, open [http://localhost:9400/](http://localhost:9400/) to access Encore's [local developer dashboard](https://encore.dev/docs/go/observability/dev-dash).
+## Libraries
 
-Here you can see traces for all the request that were generated when you used your app from the frontend, view your architecture diagram, and see API docs in the Service Catalog.
+| Library                | Purpose                                                         |
+| ---------------------- | --------------------------------------------------------------- |
+| `encore.dev`           | Service framework, sqldb, errs, structured logging              |
+| `pgx/v5` + `pgtype`    | Postgres driver; `Timestamptz` round-trips with TZ preserved    |
+| `sqlc`                 | Code-gen typed query layer from `db/query.sql`                  |
+| `time/tzdata`          | Embed IANA tz database in the binary (Alpine has no tz data)    |
 
+## Time handling
 
-## Deployment
+The whole service revolves around one rule: **wall-clock checks happen in
+the trainer's local timezone, storage happens in UTC.**
 
-### Self-hosting
+1. Storage: every time column is `TIMESTAMPTZ`. Postgres stores UTC, pgx
+   round-trips with the original instant intact.
+2. Parsing: Encore decodes JSON `time.Time` with whatever offset the
+   client sent. We never assume UTC — we immediately do
+   `t.In(loc)` against the trainer's `time.LoadLocation(...)` before any
+   `Hour`/`Minute`/`Weekday` check.
+3. Slot construction: built directly in local time via
+   `time.Date(y, m, d, h, m, 0, 0, loc)`. Building in UTC and converting
+   produces wrong times on DST transition days.
+4. `time.LoadLocation` (IANA), never `time.FixedZone`. A fixed offset
+   doesn't know about DST and silently drifts twice a year.
+5. `import _ "time/tzdata"` so the IANA database is embedded — Alpine
+   containers ship without it and `LoadLocation` would fail at runtime.
+6. **Display timezone is a client concern.** The slots endpoint accepts
+   an optional `timezone` query param so callers can render in the
+   user's zone, but the trainer's zone is the source of truth for
+   business-hour validation. The API never tries to guess.
 
-See the [self-hosting instructions](https://encore.dev/docs/go/self-host/docker-build) for how to use `encore build docker` to create a Docker image and configure it.
+## Seed strategy
 
-### Encore Cloud Platform
+Two mechanisms, each suited to its data:
 
-Deploy your application to a free staging environment in Encore's development cloud using `git push encore`:
+- **`appointments/db/fixtures.sql`** — static reference data
+  (trainers, users, weekday availability). Pure SQL, idempotent via
+  `ON CONFLICT DO NOTHING`. Loaded with one `sqldb.Exec`.
+- **`appointments/appointments.json`** — the dataset Future provided.
+  Embedded via `go:embed`, parsed in Go because the records arrive as
+  RFC3339 strings that need `time.Parse` → `pgtype.Timestamptz`
+  conversion before insert. Inserts use `ON CONFLICT (trainer_id,
+  started_at) DO NOTHING` to stay idempotent. Bypasses business-hour
+  validation — some seed records fall on weekends (Jan 26 2019 is a
+  Saturday), which is intentional historical data.
 
-```bash
-git add -A .
-git commit -m 'Commit message'
-git push encore
+Both are gated behind `encore.Meta().Environment.Cloud == encore.CloudLocal`
+so seed code is a no-op in any deployed environment.
+
+## Availability model
+
+Per-trainer, per-weekday rows in the `availability` table:
+
+```
+trainer_id | weekday (0=Sun..6=Sat) | start_time | end_time
 ```
 
-You can also open your app in the [Cloud Dashboard](https://app.encore.dev) to integrate with GitHub, or connect your AWS/GCP account, enabling Encore to automatically handle cloud deployments for you.
+No unique constraint on `(trainer_id, weekday)` — multiple rows per day
+are supported, so future use cases like a midday break ("9–12, 1–5")
+work without a schema change. NULL `start_time`/`end_time` means the
+trainer is unavailable that weekday. Default seed is M–F 08:00–17:00 to
+match the assignment.
 
-## Link to GitHub
+## What I'd add with more time
 
-Follow these steps to link your app to GitHub:
-
-1. Create a GitHub repo, commit and push the app.
-2. Open your app in the [Cloud Dashboard](https://app.encore.dev).
-3. Go to **Settings ➔ GitHub** and click on **Link app to GitHub** to link your app to GitHub and select the repo you just created.
-4. To configure Encore to automatically trigger deploys when you push to a specific branch name, go to the **Overview** page for your intended environment. Click on **Settings** and then in the section **Branch Push** configure the **Branch name** and hit **Save**.
-5. Commit and push a change to GitHub to trigger a deploy.
-
-[Learn more in the docs](https://encore.dev/docs/platform/integrations/github)
+- Pagination on `/trainers/:id/appointments`.
+- Cancellation: soft-delete column on `appointments` plus a DELETE
+  endpoint, so the unique `(trainer_id, started_at)` index becomes a
+  partial index over live rows.
+- Date-specific availability overrides table (vacations, one-off blocks).
+- Idempotency keys on `POST /appointments` so retries from flaky clients
+  don't produce ambiguity even before the unique constraint trips.
+- Pub/Sub publish on successful booking → email/SMS handler with an
+  idempotent consumer (Encore makes this a few lines).
+- Temporal-driven workflow for multi-step booking flows (hold slot →
+  collect payment → confirm), with the booking endpoint enqueueing
+  rather than writing directly.
+- A seed-data-aware test harness running against an ephemeral Encore
+  test DB; right now correctness is verified manually via the dev
+  dashboard.

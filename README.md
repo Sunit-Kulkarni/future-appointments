@@ -48,29 +48,78 @@ conflict (overlap or unique violation `23505`).
 JOINs in trainer name + user name, returns times formatted in the trainer's
 local timezone.
 
-## Running locally
-
-Prerequisites: [Encore CLI](https://encore.dev/docs/install) (`brew install
-encoredev/tap/encore`) and Docker Desktop.
-
-```bash
-encore run
-```
-
-- API: <http://localhost:4000>
-- Dev dashboard (traces, schemas, request runner): <http://localhost:9400>
+## Setup
 
 > **No Dockerfile needed.** The take-home doc mentions a Dockerfile would
 > be appreciated; Encore is the "or equivalent" — `encore run` provisions
-> Postgres in Docker for you, applies migrations, runs the seed init,
-> and exposes the dev dashboard. No `docker compose` or hand-written
+> Postgres in Docker for you, applies migrations, runs the seed init, and
+> exposes a dev dashboard. There's no `docker compose` or hand-written
 > Dockerfile to maintain.
 
-On first boot Encore provisions Postgres in Docker, applies migrations,
-and the service's `init()` seeds `fixtures.sql` (3 trainers, 10 users,
-M–F 08:00–17:00 availability) plus the appointments from
-`appointments/appointments.json`. Seeding is gated to
-`encore.CloudLocal`, so it never runs in staging or production.
+### 1. Install prerequisites
+
+```bash
+# macOS
+brew install encoredev/tap/encore
+# Docker Desktop must also be running (Encore provisions Postgres into Docker)
+```
+
+For other platforms, see <https://encore.dev/docs/install>. Anything ≥
+Encore CLI v1.50 works.
+
+### 2. Clone and run
+
+```bash
+git clone <this-repo> future-appointments
+cd future-appointments
+encore run
+```
+
+That's it — no separate `migrate`, `db create`, or seed step. On first
+boot Encore:
+
+1. Provisions a Postgres container if one isn't already running.
+2. Creates the `appointments` database and applies
+   [`appointments/db/migrations/1_create_tables.up.sql`](appointments/db/migrations/1_create_tables.up.sql).
+3. Runs the service's `init()`, which loads
+   [`fixtures.sql`](appointments/db/fixtures.sql) (3 trainers, 10 users,
+   M–F 08:00–17:00 availability) and the historical appointments from
+   [`appointments/appointments.json`](appointments/appointments.json).
+   Seeding is gated to `encore.CloudLocal`, so it never runs in staging
+   or production.
+
+### 3. Verify
+
+Two endpoints to sanity-check:
+
+```bash
+# All three trainers, with seed users joined
+curl -s http://localhost:4000/trainers/1/appointments | jq
+
+# Available 30-min slots for trainer 1, next Monday in PT
+curl -s "http://localhost:4000/trainers/1/slots?starts_at=2026-05-04T00:00:00-07:00&ends_at=2026-05-04T23:59:59-07:00" | jq
+```
+
+### 4. Useful URLs
+
+| URL | What |
+|---|---|
+| <http://localhost:4000> | API base |
+| <http://localhost:9400> | Encore dev dashboard — traces, request runner, DB browser, schema |
+
+### 5. Useful commands
+
+```bash
+encore run                      # start (auto-reloads on save)
+encore db shell appointments    # psql into the local DB
+encore db reset appointments    # drop + recreate; restart `encore run` to reseed
+encore check                    # static check (compile + lint)
+cd appointments && sqlc generate  # regenerate db/*.go after editing query.sql or migrations
+```
+
+> **Reseeding after a DB reset:** `encore db reset` clears the database
+> but the service `init()` only runs at process startup, so stop and
+> restart `encore run` to repopulate seed data.
 
 ## Why Encore
 

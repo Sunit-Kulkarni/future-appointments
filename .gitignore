@@ -2,5 +2,12 @@
 encore.gen.go
 encore.gen.cue
 /encore.gen
-.claude/
+# Claude Code: ignore transient/per-machine state, track shared config (CLAUDE.md, settings.json, agents/, skills/, commands/)
+.claude/worktrees/
+.claude/projects/
+.claude/sessions/
+.claude/todos/
+.claude/.last_run_id
+.claude/settings.local.json
+# .mcp.json is project MCP config — commit it if it's safe to share, ignore if it has local-only servers
 .mcp.json

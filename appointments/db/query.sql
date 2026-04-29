@@ -39,6 +39,3 @@ WHERE trainer_id = $1
   AND starts_at >= $2
   AND ends_at   <= $3
 ORDER BY starts_at;
-
--- name: DeleteAppointment :exec
-DELETE FROM appointments WHERE id = $1;

@@ -12,15 +12,6 @@ import (
 	"time"
 )
 
-const deleteAppointment = `-- name: DeleteAppointment :exec
-DELETE FROM appointments WHERE id = $1
-`
-
-func (q *Queries) DeleteAppointment(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, deleteAppointment, id)
-	return err
-}
-
 const getAppointmentsByTrainer = `-- name: GetAppointmentsByTrainer :many
 SELECT
     a.id,

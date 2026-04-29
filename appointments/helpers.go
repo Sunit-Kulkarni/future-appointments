@@ -16,22 +16,28 @@ type availabilityBlock struct {
 	endHour, endMin     int
 }
 
+func blockFromRow(r db.Availability) (availabilityBlock, bool) {
+	if !r.StartTime.Valid || !r.EndTime.Valid {
+		return availabilityBlock{}, false
+	}
+	startSec := r.StartTime.Microseconds / 1_000_000
+	endSec := r.EndTime.Microseconds / 1_000_000
+	return availabilityBlock{
+		startHour: int(startSec / 3600),
+		startMin:  int((startSec % 3600) / 60),
+		endHour:   int(endSec / 3600),
+		endMin:    int((endSec % 3600) / 60),
+	}, true
+}
+
 // blocksFromRows converts sqlc Availability rows for a single weekday into
 // availability blocks. Rows with NULL start/end (unavailable days) are dropped.
 func blocksFromRows(rows []db.Availability) []availabilityBlock {
 	var out []availabilityBlock
-	for _, r := range rows {
-		if !r.StartTime.Valid || !r.EndTime.Valid {
-			continue
+	for _, row := range rows {
+		if block, ok := blockFromRow(row); ok {
+			out = append(out, block)
 		}
-		startSec := r.StartTime.Microseconds / 1_000_000
-		endSec := r.EndTime.Microseconds / 1_000_000
-		out = append(out, availabilityBlock{
-			startHour: int(startSec / 3600),
-			startMin:  int((startSec % 3600) / 60),
-			endHour:   int(endSec / 3600),
-			endMin:    int((endSec % 3600) / 60),
-		})
 	}
 	return out
 }

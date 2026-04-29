@@ -42,6 +42,48 @@ func TestBlocksFromRows(t *testing.T) {
 	}
 }
 
+func TestBlockFromRow(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid 8-17 block", func(t *testing.T) {
+		row := db.Availability{StartTime: pgTime(8, 0), EndTime: pgTime(17, 0)}
+		got, ok := blockFromRow(row)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if got.startHour != 8 || got.startMin != 0 || got.endHour != 17 || got.endMin != 0 {
+			t.Errorf("unexpected block: %+v", got)
+		}
+	})
+
+	t.Run("NULL start_time", func(t *testing.T) {
+		row := db.Availability{StartTime: pgtype.Time{Valid: false}, EndTime: pgTime(17, 0)}
+		_, ok := blockFromRow(row)
+		if ok {
+			t.Fatal("expected ok=false for NULL start_time")
+		}
+	})
+
+	t.Run("NULL end_time", func(t *testing.T) {
+		row := db.Availability{StartTime: pgTime(8, 0), EndTime: pgtype.Time{Valid: false}}
+		_, ok := blockFromRow(row)
+		if ok {
+			t.Fatal("expected ok=false for NULL end_time")
+		}
+	})
+
+	t.Run("split day 9-12 block", func(t *testing.T) {
+		row := db.Availability{StartTime: pgTime(9, 0), EndTime: pgTime(12, 0)}
+		got, ok := blockFromRow(row)
+		if !ok {
+			t.Fatal("expected ok=true")
+		}
+		if got.startHour != 9 || got.startMin != 0 || got.endHour != 12 || got.endMin != 0 {
+			t.Errorf("unexpected block: %+v", got)
+		}
+	})
+}
+
 func TestWithinAvailability(t *testing.T) {
 	t.Parallel()
 	loc, _ := time.LoadLocation("America/Los_Angeles")

@@ -130,7 +130,13 @@ func TestGenerateSlots(t *testing.T) {
 	pastNow := time.Date(2000, 1, 1, 0, 0, 0, 0, loc) // far in the past, no past-filter effect
 
 	t.Run("monday produces 18 slots", func(t *testing.T) {
-		got := generateSlots(mon, mon.Add(24*time.Hour), weekdays, loc, nil, pastNow)
+		got := generateSlots(weekdays, slotRequest{
+			RangeStart: mon,
+			RangeEnd:   mon.Add(24 * time.Hour),
+			TrainerLoc: loc,
+			Booked:     nil,
+			Now:        pastNow,
+		})
 		if len(got) != 18 {
 			t.Fatalf("want 18 slots, got %d", len(got))
 		}
@@ -143,7 +149,13 @@ func TestGenerateSlots(t *testing.T) {
 	})
 
 	t.Run("saturday produces 0 slots", func(t *testing.T) {
-		got := generateSlots(sat, sat.Add(24*time.Hour), weekdays, loc, nil, pastNow)
+		got := generateSlots(weekdays, slotRequest{
+			RangeStart: sat,
+			RangeEnd:   sat.Add(24 * time.Hour),
+			TrainerLoc: loc,
+			Booked:     nil,
+			Now:        pastNow,
+		})
 		if len(got) != 0 {
 			t.Fatalf("want 0 slots on Saturday, got %d", len(got))
 		}
@@ -152,7 +164,13 @@ func TestGenerateSlots(t *testing.T) {
 	t.Run("booked set excludes matching slot", func(t *testing.T) {
 		nineAM := time.Date(2026, 5, 4, 9, 0, 0, 0, loc)
 		booked := map[int64]struct{}{nineAM.Unix(): {}}
-		got := generateSlots(mon, mon.Add(24*time.Hour), weekdays, loc, booked, pastNow)
+		got := generateSlots(weekdays, slotRequest{
+			RangeStart: mon,
+			RangeEnd:   mon.Add(24 * time.Hour),
+			TrainerLoc: loc,
+			Booked:     booked,
+			Now:        pastNow,
+		})
 		if len(got) != 17 {
 			t.Fatalf("want 17 slots (one booked), got %d", len(got))
 		}
@@ -166,7 +184,13 @@ func TestGenerateSlots(t *testing.T) {
 	t.Run("future cutoff drops past slots", func(t *testing.T) {
 		// Cutoff at 13:00 PT — slots starting before 13:00 are dropped.
 		now := time.Date(2026, 5, 4, 13, 0, 0, 0, loc)
-		got := generateSlots(mon, mon.Add(24*time.Hour), weekdays, loc, nil, now)
+		got := generateSlots(weekdays, slotRequest{
+			RangeStart: mon,
+			RangeEnd:   mon.Add(24 * time.Hour),
+			TrainerLoc: loc,
+			Booked:     nil,
+			Now:        now,
+		})
 		if len(got) != 8 { // 13:00..16:30 inclusive = 8 slots
 			t.Fatalf("want 8 future slots, got %d", len(got))
 		}
@@ -179,11 +203,57 @@ func TestGenerateSlots(t *testing.T) {
 		// Window: 10:00..12:00 PT — only 10:00, 10:30, 11:00, 11:30 fit.
 		start := time.Date(2026, 5, 4, 10, 0, 0, 0, loc)
 		end := time.Date(2026, 5, 4, 12, 0, 0, 0, loc)
-		got := generateSlots(start, end, weekdays, loc, nil, pastNow)
+		got := generateSlots(weekdays, slotRequest{
+			RangeStart: start,
+			RangeEnd:   end,
+			TrainerLoc: loc,
+			Booked:     nil,
+			Now:        pastNow,
+		})
 		if len(got) != 4 {
 			t.Fatalf("want 4 clipped slots, got %d", len(got))
 		}
 	})
+}
+
+func TestIsSlotAvailable(t *testing.T) {
+	t.Parallel()
+	loc, _ := time.LoadLocation("America/Los_Angeles")
+	rangeStart := time.Date(2026, 5, 4, 8, 0, 0, 0, loc)
+	rangeEnd   := time.Date(2026, 5, 4, 17, 0, 0, 0, loc)
+	past       := time.Date(2000, 1, 1, 0, 0, 0, 0, loc)
+	slotS      := time.Date(2026, 5, 4, 9, 0, 0, 0, loc)
+	slotE      := slotS.Add(SlotDuration)
+
+	base := slotRequest{
+		RangeStart: rangeStart,
+		RangeEnd:   rangeEnd,
+		TrainerLoc: loc,
+		Booked:     nil,
+		Now:        past,
+	}
+
+	cases := []struct {
+		name  string
+		req   slotRequest
+		start time.Time
+		end   time.Time
+		want  bool
+	}{
+		{"inside window, future, not booked", base, slotS, slotE, true},
+		{"before window start", base, rangeStart.Add(-time.Hour), rangeStart.Add(-30 * time.Minute), false},
+		{"after window end", base, rangeEnd, rangeEnd.Add(SlotDuration), false},
+		{"in the past", slotRequest{RangeStart: rangeStart, RangeEnd: rangeEnd, TrainerLoc: loc, Now: slotE}, slotS, slotE, false},
+		{"in booked set", slotRequest{RangeStart: rangeStart, RangeEnd: rangeEnd, TrainerLoc: loc, Booked: map[int64]struct{}{slotS.Unix(): {}}, Now: past}, slotS, slotE, false},
+		{"nil booked map, valid slot", base, slotS, slotE, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.req.isSlotAvailable(c.start, c.end); got != c.want {
+				t.Errorf("isSlotAvailable() = %v, want %v", got, c.want)
+			}
+		})
+	}
 }
 
 func TestIsUniqueViolation(t *testing.T) {

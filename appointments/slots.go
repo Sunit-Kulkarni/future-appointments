@@ -90,7 +90,13 @@ func GetSlots(ctx context.Context, trainerID int32, p *GetSlotsParams) (*GetSlot
 		booked[b.StartsAt.Time.Unix()] = struct{}{}
 	}
 
-	slots := generateSlots(p.StartsAt, p.EndsAt, byWeekday, trainerLoc, booked, time.Now())
+	slots := generateSlots(byWeekday, slotRequest{
+		RangeStart: p.StartsAt,
+		RangeEnd:   p.EndsAt,
+		TrainerLoc: trainerLoc,
+		Booked:     booked,
+		Now:        time.Now(),
+	})
 
 	out := make([]Slot, 0, len(slots))
 	for _, s := range slots {

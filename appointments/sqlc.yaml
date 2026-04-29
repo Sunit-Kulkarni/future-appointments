@@ -8,3 +8,8 @@ sql:
         package: "db"
         out: "db"
         sql_package: "pgx/v5"
+        overrides:
+          - column: "availability.weekday"
+            go_type:
+              import: "time"
+              type: "Weekday"

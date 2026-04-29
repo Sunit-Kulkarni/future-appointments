@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"time"
 )
 
 const deleteAppointment = `-- name: DeleteAppointment :exec
@@ -161,7 +162,7 @@ ORDER BY start_time
 
 type GetAvailabilityByTrainerAndWeekdayParams struct {
 	TrainerID int32
-	Weekday   int16
+	Weekday   time.Weekday
 }
 
 func (q *Queries) GetAvailabilityByTrainerAndWeekday(ctx context.Context, arg GetAvailabilityByTrainerAndWeekdayParams) ([]Availability, error) {

@@ -165,7 +165,7 @@ cd appointments && sqlc generate  # regenerate db/*.go after editing query.sql o
 | ---------------------- | --------------------------------------------------------------- |
 | `encore.dev`           | Service framework, sqldb, errs, structured logging              |
 | `pgx/v5` + `pgtype`    | Postgres driver; `Timestamptz` round-trips with TZ preserved    |
-| `sqlc`                 | Code-gen typed query layer from `db/query.sql`                  |
+| `sqlc`                 | Code-gen typed query layer from `db/query.sql`; column-level type override maps `availability.weekday` to `time.Weekday` directly, eliminating `int16` coercion at the application layer |
 | `time/tzdata`          | Embed IANA tz database in the binary (Alpine has no tz data)    |
 
 ## Time handling
@@ -241,12 +241,14 @@ defensive code disappear:
 
 ### Slot generation — hash-set lookup, single pass
 
-`generateSlots` ([appointments/helpers.go](appointments/helpers.go)) builds
-30-minute slots day-by-day in the trainer's local timezone, checking three
-conditions inline:
+`generateSlots` ([appointments/helpers.go](appointments/helpers.go)) takes a
+`slotRequest` params struct (range bounds, trainer timezone, booked set, and
+current time snapshot) and builds 30-minute slots day-by-day. Each candidate
+is filtered through `req.isSlotAvailable(start, end)`, a method on
+`slotRequest` that encapsulates three conditions:
 
 1. The slot fits inside the requested `[starts_at, ends_at]` window.
-2. The slot starts in the future (`!slot.Before(time.Now())`).
+2. The slot starts in the future (`!start.Before(req.Now)`).
 3. The slot's start instant isn't in the `booked` hash set.
 
 The booked set is built once from the `GetAppointmentsByTrainerBetween`
@@ -255,7 +257,11 @@ is O(1). Total: **O(D·B·S + K)**, where D = days, B = blocks/day, S =
 slots/block, K = booked appointments — versus the naive O(D·B·S·K) that
 overlap-scans every slot against every booking. There's no separate
 `filterBookedSlots` or `filterPast` pass; both checks happen in the same
-loop that emits slots.
+loop that emits slots. The `byWeekday` map passed to `generateSlots` is
+built in a single pass inside `GetSlots`
+([appointments/slots.go](appointments/slots.go)) using `blockFromRow` — the
+primary per-row converter. `blocksFromRows` is a thin wrapper over
+`blockFromRow` used in the flat-slice path (tests and `withinAvailability`).
 
 ### Booking — the unique index *is* the safety net
 

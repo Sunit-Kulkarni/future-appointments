@@ -6,6 +6,7 @@ package db
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
+	"time"
 )
 
 type Appointment struct {
@@ -20,7 +21,7 @@ type Appointment struct {
 type Availability struct {
 	ID        int32
 	TrainerID int32
-	Weekday   int16
+	Weekday   time.Weekday
 	StartTime pgtype.Time
 	EndTime   pgtype.Time
 }

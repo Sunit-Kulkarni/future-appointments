@@ -68,12 +68,12 @@ func GetSlots(ctx context.Context, trainerID int32, p *GetSlotsParams) (*GetSlot
 	}
 
 	byWeekday := make(map[time.Weekday][]availabilityBlock)
-	grouped := make(map[int16][]db.Availability)
+	grouped := make(map[time.Weekday][]db.Availability)
 	for _, row := range availRows {
 		grouped[row.Weekday] = append(grouped[row.Weekday], row)
 	}
 	for wd, rows := range grouped {
-		byWeekday[time.Weekday(wd)] = blocksFromRows(rows)
+		byWeekday[wd] = blocksFromRows(rows)
 	}
 
 	bookedRows, err := query.GetAppointmentsByTrainerBetween(ctx, db.GetAppointmentsByTrainerBetweenParams{

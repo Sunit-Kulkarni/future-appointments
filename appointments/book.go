@@ -63,7 +63,7 @@ func Book(ctx context.Context, p *BookParams) (*Appointment, error) {
 
 	availRows, err := query.GetAvailabilityByTrainerAndWeekday(ctx, db.GetAvailabilityByTrainerAndWeekdayParams{
 		TrainerID: p.TrainerID,
-		Weekday:   int16(localStart.Weekday()),
+		Weekday:   localStart.Weekday(),
 	})
 	if err != nil {
 		return nil, eb.Cause(err).Code(errs.Unavailable).Msg("failed to load availability").Err()
